@@ -147,6 +147,9 @@ Say the word and I'll add the shortcode plugin (`media-tracker-embed.php`).
 
 ## Deployment notes
 
+> **Deploying to Railway?** Follow [`DEPLOY.md`](./DEPLOY.md) for a click-by-click
+> walkthrough (persistent volume, env vars, custom domain, WordPress embed).
+
 This is a long-running Node process. Any of these work:
 
 - A small VPS / container behind Nginx or Caddy for TLS (`node server.js`
