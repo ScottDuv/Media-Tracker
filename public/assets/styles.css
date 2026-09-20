@@ -1,0 +1,161 @@
+:root {
+  --accent: #e2211c;        /* Domino's-style red; override to match Valley's brand */
+  --accent-soft: #fdecec;
+  --ink: #1a1c1f;
+  --muted: #6b7280;
+  --line: #e5e7eb;
+  --bg: #ffffff;
+  --panel: #f8f9fb;
+  --ok: #16a34a;
+  --ok-soft: #e7f6ec;
+  --radius: 14px;
+  --shadow: 0 1px 2px rgba(16, 24, 40, 0.06), 0 6px 20px rgba(16, 24, 40, 0.06);
+  font-synthesis: none;
+}
+
+* { box-sizing: border-box; }
+
+html, body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--ink);
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  line-height: 1.5;
+}
+
+.wrap { max-width: 980px; margin: 0 auto; padding: 24px 16px 64px; }
+
+/* ---- code entry ---- */
+.gate { max-width: 460px; margin: 8vh auto 0; text-align: center; padding: 0 16px; }
+.gate h1 { font-size: 1.6rem; margin: 0 0 8px; }
+.gate p { color: var(--muted); margin: 0 0 24px; }
+.code-form { display: flex; gap: 8px; }
+.code-form input {
+  flex: 1; font-size: 1.15rem; letter-spacing: 0.12em; text-align: center;
+  padding: 14px 16px; border: 1.5px solid var(--line); border-radius: var(--radius);
+  outline: none; transition: border-color .15s;
+}
+.code-form input:focus { border-color: var(--accent); }
+button {
+  font: inherit; font-weight: 600; cursor: pointer; border: none; border-radius: var(--radius);
+  padding: 14px 20px; background: var(--accent); color: #fff; transition: filter .15s;
+}
+button:hover { filter: brightness(0.94); }
+button.ghost { background: transparent; color: var(--accent); border: 1.5px solid var(--line); }
+button.small { padding: 7px 12px; font-size: .85rem; border-radius: 9px; }
+button.danger { background: #fff; color: #b42318; border: 1.5px solid #f3c6c0; }
+.err { color: #b42318; min-height: 1.2em; font-size: .92rem; margin-top: 10px; }
+
+/* ---- tracker header ---- */
+.header { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; flex-wrap: wrap; margin-bottom: 18px; }
+.header h1 { font-size: 1.4rem; margin: 0; }
+.header .sub { color: var(--muted); font-size: .92rem; }
+.linkish { background: none; color: var(--muted); border: none; padding: 4px 6px; font-size: .9rem; }
+.linkish:hover { color: var(--accent); filter: none; }
+
+/* ---- video card ---- */
+.card {
+  background: var(--bg); border: 1px solid var(--line); border-radius: var(--radius);
+  box-shadow: var(--shadow); padding: 20px 20px 8px; margin-bottom: 18px;
+}
+.card-top { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; flex-wrap: wrap; }
+.card-title { font-size: 1.12rem; font-weight: 700; margin: 0; }
+.status-pill {
+  font-size: .8rem; font-weight: 700; padding: 4px 12px; border-radius: 999px;
+  background: var(--accent-soft); color: var(--accent); white-space: nowrap;
+}
+.status-pill.done { background: var(--ok-soft); color: var(--ok); }
+.updated { color: var(--muted); font-size: .78rem; margin-top: 2px; }
+
+/* ---- progress bar ---- */
+.bar { height: 6px; background: var(--line); border-radius: 999px; margin: 16px 0 22px; overflow: hidden; }
+.bar > span { display: block; height: 100%; background: var(--accent); border-radius: 999px; transition: width .5s ease; }
+.card.done .bar > span { background: var(--ok); }
+
+/* ---- stepper ---- */
+.stepper { display: flex; gap: 2px; padding-bottom: 10px; }
+.step { flex: 1; text-align: center; position: relative; min-width: 0; }
+.step .dot {
+  width: 34px; height: 34px; border-radius: 50%; margin: 0 auto 8px;
+  display: grid; place-items: center; font-weight: 700; font-size: .9rem;
+  background: #fff; border: 2px solid var(--line); color: var(--muted); position: relative; z-index: 2;
+  transition: all .3s;
+}
+.step .connector { position: absolute; top: 17px; left: -50%; width: 100%; height: 2px; background: var(--line); z-index: 1; }
+.step:first-child .connector { display: none; }
+.step .label { font-size: .74rem; color: var(--muted); font-weight: 600; padding: 0 2px; cursor: help; }
+
+.step.complete .dot { background: var(--ok); border-color: var(--ok); color: #fff; }
+.step.complete .connector { background: var(--ok); }
+.step.complete .label { color: var(--ink); }
+.step.current .dot { background: var(--accent); border-color: var(--accent); color: #fff; animation: pulse 1.8s infinite; }
+.step.current .label { color: var(--accent); font-weight: 700; }
+
+@keyframes pulse {
+  0% { box-shadow: 0 0 0 0 rgba(226, 33, 28, .35); }
+  70% { box-shadow: 0 0 0 10px rgba(226, 33, 28, 0); }
+  100% { box-shadow: 0 0 0 0 rgba(226, 33, 28, 0); }
+}
+@media (prefers-reduced-motion: reduce) { .step.current .dot { animation: none; } }
+
+/* ---- tooltip ---- */
+.tip {
+  position: absolute; z-index: 20; bottom: calc(100% + 10px); left: 50%; transform: translateX(-50%);
+  width: 240px; max-width: 78vw; background: var(--ink); color: #fff; text-align: left;
+  padding: 12px 14px; border-radius: 10px; font-size: .82rem; font-weight: 400; line-height: 1.45;
+  box-shadow: 0 8px 24px rgba(0,0,0,.24); opacity: 0; pointer-events: none; transition: opacity .15s;
+}
+.tip strong { display: block; margin-bottom: 4px; font-size: .88rem; }
+.tip::after {
+  content: ""; position: absolute; top: 100%; left: 50%; transform: translateX(-50%);
+  border: 7px solid transparent; border-top-color: var(--ink);
+}
+.step .label:hover + .tip, .step.tip-open .tip { opacity: 1; pointer-events: auto; }
+
+/* keep tooltips inside the card edges */
+.step:first-child .tip { left: 0; transform: none; }
+.step:first-child .tip::after { left: 20px; }
+.step:last-child .tip { left: auto; right: 0; transform: none; }
+.step:last-child .tip::after { left: auto; right: 20px; }
+
+/* ---- responsive: vertical stepper on narrow screens ---- */
+@media (max-width: 640px) {
+  .stepper { flex-direction: column; gap: 0; }
+  .step { display: grid; grid-template-columns: 34px 1fr; align-items: center; gap: 12px; text-align: left; padding: 8px 0; }
+  .step .dot { margin: 0; }
+  .step .connector { display: block; top: -50%; left: 16px; width: 2px; height: 100%; }
+  .step:first-child .connector { display: none; }
+  .step .label { font-size: .92rem; }
+  .tip { position: static; transform: none; width: auto; max-width: none; opacity: 0; height: 0; padding: 0; overflow: hidden; grid-column: 2; }
+  .step.tip-open .tip { opacity: 1; height: auto; padding: 10px 12px; margin-top: 6px; }
+  .tip::after { display: none; }
+}
+
+/* ---- studio ---- */
+.toolbar { display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; gap: 12px; flex-wrap: wrap; }
+.brandmark { font-weight: 800; font-size: 1.2rem; }
+.brandmark span { color: var(--accent); }
+.row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+input.text, select.text {
+  font: inherit; padding: 9px 12px; border: 1.5px solid var(--line); border-radius: 10px; outline: none; background: #fff;
+}
+input.text:focus, select.text:focus { border-color: var(--accent); }
+.panel { background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); padding: 18px; margin-bottom: 16px; }
+.panel h2 { margin: 0 0 4px; font-size: 1.1rem; }
+.muted { color: var(--muted); }
+.code-chip { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; background: #fff; border: 1px solid var(--line); border-radius: 8px; padding: 3px 10px; font-weight: 700; letter-spacing: .05em; }
+.pv { border-top: 1px dashed var(--line); padding: 14px 0; }
+.pv:first-of-type { border-top: none; }
+.pv-title { font-weight: 700; margin: 0 0 8px; }
+.chipset { display: flex; flex-wrap: wrap; gap: 6px; }
+.phase-chip {
+  font-size: .82rem; padding: 6px 12px; border-radius: 999px; border: 1.5px solid var(--line);
+  background: #fff; cursor: pointer; color: var(--ink);
+}
+.phase-chip.active { background: var(--accent); border-color: var(--accent); color: #fff; }
+.phase-chip.done { background: var(--ok-soft); border-color: #bfe6cb; color: var(--ok); }
+.hide { display: none !important; }
+.spread { display: flex; justify-content: space-between; align-items: center; gap: 10px; flex-wrap: wrap; }
+.footer-note { color: var(--muted); font-size: .82rem; text-align: center; margin-top: 28px; }
+a { color: var(--accent); }

@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Media Tracker — Studio</title>
+  <meta name="robots" content="noindex" />
+  <link rel="stylesheet" href="/assets/styles.css" />
+</head>
+<body>
+  <!-- Login -->
+  <section id="login" class="gate hide">
+    <div class="brandmark" style="margin-bottom:18px;">Media<span>Tracker</span> · Studio</div>
+    <p>Sign in to manage project trackers.</p>
+    <form id="loginForm" class="code-form" autocomplete="off">
+      <input id="password" type="password" placeholder="Studio password" aria-label="Studio password" />
+      <button type="submit">Sign in</button>
+    </form>
+    <div id="loginErr" class="err" role="alert"></div>
+  </section>
+
+  <!-- Console -->
+  <main id="console" class="wrap hide">
+    <div class="toolbar">
+      <div class="brandmark">Media<span>Tracker</span> · Studio</div>
+      <div class="row">
+        <button id="logout" class="ghost small" type="button">Sign out</button>
+      </div>
+    </div>
+
+    <div class="panel">
+      <h2>New project</h2>
+      <p class="muted">Give the client a code (a compressed shoot date works well, e.g. 2026728). They enter it to see their trackers.</p>
+      <form id="projForm" class="row" autocomplete="off">
+        <input class="text" id="projCode" placeholder="Project code" required />
+        <input class="text" id="projClient" placeholder="Client / project name (optional)" />
+        <button type="submit">Create project</button>
+      </form>
+      <div id="projErr" class="err"></div>
+    </div>
+
+    <div id="projects"></div>
+    <div class="footer-note">Client view: <a id="clientLink" href="/" target="_blank" rel="noopener">open the client tracker →</a></div>
+  </main>
+
+  <script src="/assets/studio.js"></script>
+</body>
+</html>
