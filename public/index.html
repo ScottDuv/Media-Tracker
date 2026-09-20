@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Project Tracker</title>
+  <meta name="description" content="Track the status of your video project in real time." />
+  <link rel="stylesheet" href="/assets/styles.css" />
+</head>
+<body>
+  <!-- Code entry -->
+  <section id="gate" class="gate">
+    <h1>Track your project</h1>
+    <p>Enter the project code your producer gave you to see the status of your videos.</p>
+    <form id="codeForm" class="code-form" autocomplete="off">
+      <input id="codeInput" name="code" inputmode="numeric" placeholder="e.g. 2026728"
+             aria-label="Project code" maxlength="40" />
+      <button type="submit">Track</button>
+    </form>
+    <div id="gateErr" class="err" role="alert"></div>
+  </section>
+
+  <!-- Tracker -->
+  <main id="tracker" class="wrap hide">
+    <div class="header">
+      <div>
+        <h1 id="clientName">Your videos</h1>
+        <div class="sub">Project code <span id="codeLabel" class="code-chip"></span> · updates automatically</div>
+      </div>
+      <button id="changeCode" class="linkish" type="button">Use a different code</button>
+    </div>
+    <div id="cards"></div>
+    <div id="empty" class="footer-note hide">No videos have been added to this project yet. Check back soon.</div>
+  </main>
+
+  <script src="/assets/client.js"></script>
+</body>
+</html>
