@@ -4,7 +4,7 @@ const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
 
-const { defaultTimeline } = require('./phases');
+const { defaultTimeline, PHASES } = require('./phases');
 
 /**
  * Tiny JSON-file data store. No external database required — the whole state
@@ -16,7 +16,7 @@ const { defaultTimeline } = require('./phases');
 const DATA_DIR = process.env.MT_DATA_DIR || path.join(__dirname, '..', 'data');
 const DATA_FILE = path.join(DATA_DIR, 'data.json');
 
-let state = { projects: {}, videos: {} };
+let state = { projects: {}, videos: {}, asana: { webhooks: {} } };
 let writeQueued = false;
 
 function id(prefix) {
@@ -33,6 +33,8 @@ function load() {
       state = JSON.parse(fs.readFileSync(DATA_FILE, 'utf8'));
       state.projects = state.projects || {};
       state.videos = state.videos || {};
+      state.asana = state.asana || { webhooks: {} };
+      state.asana.webhooks = state.asana.webhooks || {};
     } else {
       seed();
       persist();
@@ -45,7 +47,7 @@ function load() {
     } catch (_) {
       /* ignore */
     }
-    state = { projects: {}, videos: {} };
+    state = { projects: {}, videos: {}, asana: { webhooks: {} } };
     seed();
     persist();
   }
@@ -94,12 +96,13 @@ function stampTimeline(timeline) {
   return timeline.map((s) => ({ sid: id('step'), key: s.key, cycle: s.cycle }));
 }
 
-function newVideoRecord(projectId, title) {
+function newVideoRecord(projectId, title, asanaTaskId = null) {
   const timeline = stampTimeline(defaultTimeline());
   return {
     id: id('vid'),
     projectId,
     title,
+    asanaTaskId,
     timeline,
     currentStepId: timeline[0].sid,
     delivered: false,
@@ -125,7 +128,7 @@ function findProjectByCode(code) {
   return Object.values(state.projects).find((p) => p.code === norm) || null;
 }
 
-function createProject({ code, clientName }) {
+function createProject({ code, clientName, displayName }) {
   const norm = String(code || '').trim();
   if (!norm) throw new Error('A project code is required.');
   if (findProjectByCode(norm)) throw new Error('That project code is already in use.');
@@ -133,6 +136,8 @@ function createProject({ code, clientName }) {
     id: id('proj'),
     code: norm,
     clientName: String(clientName || '').trim(),
+    displayName: String(displayName || '').trim(),
+    asanaProjectGid: null,
     createdAt: nowIso(),
   };
   state.projects[project.id] = project;
@@ -151,6 +156,22 @@ function updateProject(projectId, { code, clientName }) {
     project.code = norm;
   }
   if (clientName !== undefined) project.clientName = String(clientName).trim();
+  persist();
+  return project;
+}
+
+function updateProjectFields(projectId, patch) {
+  const project = state.projects[projectId];
+  if (!project) throw new Error('Project not found.');
+  if (patch.displayName !== undefined) project.displayName = String(patch.displayName).trim();
+  if (patch.clientName !== undefined) project.clientName = String(patch.clientName).trim();
+  if (patch.code !== undefined) {
+    const norm = String(patch.code).trim();
+    if (!norm) throw new Error('A project code is required.');
+    const clash = findProjectByCode(norm);
+    if (clash && clash.id !== projectId) throw new Error('That project code is already in use.');
+    project.code = norm;
+  }
   persist();
   return project;
 }
@@ -257,6 +278,148 @@ function removeStep(videoId, sid) {
   return video;
 }
 
+// ---- Asana linkage -------------------------------------------------------
+
+function findProjectByCodeOrGid(input) {
+  const norm = String(input || '').trim();
+  if (!norm) return null;
+  return (
+    Object.values(state.projects).find((p) => p.code === norm || p.asanaProjectGid === norm) || null
+  );
+}
+
+function getProjectByAsanaGid(gid) {
+  const norm = String(gid || '').trim();
+  return Object.values(state.projects).find((p) => p.asanaProjectGid === norm) || null;
+}
+
+/** Find or create a Media Tracker project bound to an Asana project GID. */
+function upsertAsanaProject({ asanaProjectGid, clientName, displayName }) {
+  const gid = String(asanaProjectGid).trim();
+  const existing = getProjectByAsanaGid(gid);
+  if (existing) return existing;
+  // Default the client code to the Asana GID; fall back stays the GID if a
+  // friendly code ever collides (GIDs are globally unique).
+  let code = gid;
+  if (findProjectByCode(code)) code = gid;
+  const project = {
+    id: id('proj'),
+    code,
+    asanaProjectGid: gid,
+    clientName: String(clientName || '').trim(),
+    displayName: String(displayName || '').trim(),
+    createdAt: nowIso(),
+  };
+  state.projects[project.id] = project;
+  persist();
+  return project;
+}
+
+function getVideoByAsanaTaskId(taskId) {
+  const norm = String(taskId || '').trim();
+  return Object.values(state.videos).find((v) => v.asanaTaskId === norm) || null;
+}
+
+/** Find or create a video bound to an Asana task GID. */
+function upsertAsanaVideo(projectId, title, asanaTaskId) {
+  const existing = getVideoByAsanaTaskId(asanaTaskId);
+  if (existing) {
+    if (title && title !== existing.title) {
+      existing.title = title;
+      existing.updatedAt = nowIso();
+      persist();
+    }
+    return existing;
+  }
+  const video = newVideoRecord(projectId, String(title || 'Untitled video').trim(), String(asanaTaskId));
+  state.videos[video.id] = video;
+  persist();
+  return video;
+}
+
+/**
+ * Move a video to the phase named by `phaseKey` (from an Asana dropdown).
+ * Non-repeatable phases jump to their single step. Repeatable phases
+ * (client_review / revision) advance to the next unused round, or create the
+ * next numbered round if none remains — this is what auto-numbers the
+ * Client Review / Revision bounce. 'delivered' marks the whole video done.
+ * Idempotent: a repeated event for the current phase is a no-op.
+ */
+function setVideoPhaseByKey(videoId, phaseKey) {
+  const video = state.videos[videoId];
+  if (!video) throw new Error('Video not found.');
+
+  if (phaseKey === 'delivered') {
+    video.delivered = true;
+    const fc = video.timeline.find((s) => s.key === 'final_cut');
+    if (fc) video.currentStepId = fc.sid;
+    video.updatedAt = nowIso();
+    persist();
+    return video;
+  }
+
+  const def = PHASES[phaseKey];
+  if (!def) throw new Error(`Unknown phase: ${phaseKey}`);
+  video.delivered = false;
+
+  const currentIdx = video.timeline.findIndex((s) => s.sid === video.currentStepId);
+  const currentStep = video.timeline[currentIdx];
+
+  if (!def.repeatable) {
+    let step = video.timeline.find((s) => s.key === phaseKey);
+    if (!step) {
+      step = { sid: id('step'), key: phaseKey, cycle: null };
+      video.timeline.push(step);
+    }
+    video.currentStepId = step.sid;
+  } else if (!currentStep || currentStep.key !== phaseKey) {
+    // Advance to the next existing round of this phase after the current step…
+    let next = null;
+    for (let i = currentIdx + 1; i < video.timeline.length; i++) {
+      if (video.timeline[i].key === phaseKey) {
+        next = video.timeline[i];
+        break;
+      }
+    }
+    if (next) {
+      video.currentStepId = next.sid;
+    } else {
+      // …or create the next numbered round just before Final Cut Delivery.
+      const count = video.timeline.filter((s) => s.key === phaseKey).length;
+      const step = { sid: id('step'), key: phaseKey, cycle: count + 1 };
+      const finalIdx = video.timeline.findIndex((s) => s.key === 'final_cut');
+      if (finalIdx === -1) video.timeline.push(step);
+      else video.timeline.splice(finalIdx, 0, step);
+      video.currentStepId = step.sid;
+    }
+  }
+  // else: already on this repeatable phase → no-op (duplicate event)
+
+  video.updatedAt = nowIso();
+  persist();
+  return video;
+}
+
+// ---- Asana webhook records ----
+
+function saveWebhook(projectGid, rec) {
+  state.asana.webhooks[String(projectGid)] = rec; // { gid, secret, mtProjectId }
+  persist();
+}
+
+function listWebhooks() {
+  return { ...state.asana.webhooks };
+}
+
+function getWebhookByProject(projectGid) {
+  return state.asana.webhooks[String(projectGid)] || null;
+}
+
+function deleteWebhookRecord(projectGid) {
+  delete state.asana.webhooks[String(projectGid)];
+  persist();
+}
+
 module.exports = {
   load,
   listProjects,
@@ -264,6 +427,7 @@ module.exports = {
   findProjectByCode,
   createProject,
   updateProject,
+  updateProjectFields,
   deleteProject,
   listVideos,
   getVideo,
@@ -272,4 +436,15 @@ module.exports = {
   deleteVideo,
   addStep,
   removeStep,
+  // Asana
+  findProjectByCodeOrGid,
+  getProjectByAsanaGid,
+  upsertAsanaProject,
+  getVideoByAsanaTaskId,
+  upsertAsanaVideo,
+  setVideoPhaseByKey,
+  saveWebhook,
+  listWebhooks,
+  getWebhookByProject,
+  deleteWebhookRecord,
 };

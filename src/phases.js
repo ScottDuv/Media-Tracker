@@ -93,4 +93,44 @@ function stepLabel(step) {
   return def.label;
 }
 
-module.exports = { PHASES, PHASE_ORDER, defaultTimeline, stepLabel };
+/**
+ * The options for the "Tracker Phase" dropdown (enum custom field) in Asana,
+ * in order. "Delivered" is an extra terminal option that maps to the video's
+ * delivered flag rather than a timeline step.
+ */
+const ASANA_PHASE_OPTIONS = [
+  'Transcription',
+  'Rough Edit',
+  'Fine Edit',
+  'Client Review',
+  'Revision',
+  'Final Cut Delivery',
+  'Delivered',
+];
+
+/**
+ * Map an Asana "Tracker Phase" option label to an internal phase key.
+ * Returns 'delivered' for the terminal option, or null if unrecognized.
+ */
+function phaseKeyFromLabel(label) {
+  const norm = String(label || '').trim().toLowerCase();
+  const table = {
+    transcription: 'transcription',
+    'rough edit': 'rough_edit',
+    'fine edit': 'fine_edit',
+    'client review': 'client_review',
+    revision: 'revision',
+    'final cut delivery': 'final_cut',
+    delivered: 'delivered',
+  };
+  return table[norm] || null;
+}
+
+module.exports = {
+  PHASES,
+  PHASE_ORDER,
+  defaultTimeline,
+  stepLabel,
+  ASANA_PHASE_OPTIONS,
+  phaseKeyFromLabel,
+};
