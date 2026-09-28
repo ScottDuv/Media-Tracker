@@ -72,6 +72,11 @@ function request(method, path, body) {
   });
 }
 
+/** Encode a path segment (defense-in-depth; GIDs are numeric in practice). */
+function enc(seg) {
+  return encodeURIComponent(String(seg));
+}
+
 /** Accept an Asana project URL or a bare GID and return the numeric GID. */
 function parseProjectGid(input) {
   const s = String(input || '').trim();
@@ -85,7 +90,7 @@ function parseProjectGid(input) {
 // ---- reads ----
 
 function getProject(gid) {
-  return request('GET', `/projects/${gid}?opt_fields=name,workspace.name`);
+  return request('GET', `/projects/${enc(gid)}?opt_fields=name,workspace.name`);
 }
 
 const TASK_FIELDS =
@@ -93,11 +98,11 @@ const TASK_FIELDS =
   'custom_fields.name,custom_fields.enum_value.name,custom_fields.type';
 
 function getTask(gid) {
-  return request('GET', `/tasks/${gid}?${TASK_FIELDS}`);
+  return request('GET', `/tasks/${enc(gid)}?${TASK_FIELDS}`);
 }
 
 function listProjectTasks(projectGid) {
-  return request('GET', `/projects/${projectGid}/tasks?${TASK_FIELDS}&limit=100`);
+  return request('GET', `/projects/${enc(projectGid)}/tasks?${TASK_FIELDS}&limit=100`);
 }
 
 /** Read the "Tracker Phase" option label off a task object, or null. */
@@ -117,7 +122,7 @@ function trackerPhaseLabel(task) {
 async function ensureTrackerPhaseField(workspaceGid) {
   const existing = await request(
     'GET',
-    `/workspaces/${workspaceGid}/custom_fields?opt_fields=name,resource_type&limit=100`
+    `/workspaces/${enc(workspaceGid)}/custom_fields?opt_fields=name,resource_type&limit=100`
   );
   const found = (existing || []).find(
     (f) => (f.name || '').trim().toLowerCase() === FIELD_NAME.toLowerCase()
@@ -136,7 +141,7 @@ async function ensureTrackerPhaseField(workspaceGid) {
 /** Attach the field to a project (idempotent — Asana no-ops if already set). */
 async function addFieldToProject(projectGid, fieldGid) {
   try {
-    await request('POST', `/projects/${projectGid}/addCustomFieldSetting`, {
+    await request('POST', `/projects/${enc(projectGid)}/addCustomFieldSetting`, {
       custom_field: fieldGid,
       is_important: true,
     });
@@ -151,12 +156,14 @@ async function addFieldToProject(projectGid, fieldGid) {
 /**
  * Create a webhook on a project targeting this app. Asana performs a handshake
  * POST to `target` synchronously; the caller's server must echo the
- * X-Hook-Secret header on that request (see server.js). Returns the webhook
- * record (includes gid).
+ * X-Hook-Secret header on that request (see server.js). The `nonce` is added to
+ * the target URL so the handshake secret can be correlated to this exact
+ * request (see sync.js) rather than shared globally. Returns the webhook record.
  */
-function createWebhook(projectGid) {
-  const target = `${publicBaseUrl()}/api/hooks/asana`;
+function createWebhook(projectGid, nonce) {
   if (!publicBaseUrl()) throw new Error('PUBLIC_BASE_URL is not set on the server.');
+  if (!nonce) throw new Error('A handshake nonce is required.');
+  const target = `${publicBaseUrl()}/api/hooks/asana?c=${enc(nonce)}`;
   return request('POST', '/webhooks', {
     resource: projectGid,
     target,
@@ -170,7 +177,7 @@ function createWebhook(projectGid) {
 }
 
 function deleteWebhook(webhookGid) {
-  return request('DELETE', `/webhooks/${webhookGid}`);
+  return request('DELETE', `/webhooks/${enc(webhookGid)}`);
 }
 
 /** Verify an event request's X-Hook-Signature against a webhook secret. */

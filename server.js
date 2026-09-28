@@ -161,10 +161,11 @@ async function handleRequest(req, res) {
     // --- Asana webhook (public; authenticated by handshake + HMAC signature) ---
     if (method === 'POST' && pathname === '/api/hooks/asana') {
       const raw = await readRaw(req);
-      // 1) Handshake: Asana sends X-Hook-Secret once, which we echo back.
+      // 1) Handshake: Asana sends X-Hook-Secret once, which we echo back. The
+      //    nonce in the query correlates the secret to the connect that started it.
       const secretHeader = req.headers['x-hook-secret'];
       if (secretHeader) {
-        sync.handshake.secret = secretHeader;
+        sync.captureHandshake(url.searchParams.get('c'), secretHeader);
         res.writeHead(200, { 'X-Hook-Secret': secretHeader });
         return res.end();
       }

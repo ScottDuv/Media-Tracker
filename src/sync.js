@@ -1,5 +1,7 @@
 'use strict';
 
+const crypto = require('crypto');
+
 const store = require('./store');
 const asana = require('./asana');
 const { phaseKeyFromLabel } = require('./phases');
@@ -10,9 +12,15 @@ const { phaseKeyFromLabel } = require('./phases');
  * incoming webhook events into tracker phase changes.
  */
 
-// Secret captured by the webhook endpoint during Asana's handshake POST.
-// connectProject() reads it immediately after createWebhook resolves.
-const handshake = { secret: null };
+// Handshake secrets in flight, keyed by the per-connect nonce placed in the
+// webhook target URL. This scopes each secret to its own connect, so a
+// concurrent (or malicious) handshake POST cannot poison another's secret.
+const pendingHandshakes = new Map();
+
+/** Called by the webhook endpoint when Asana performs its handshake POST. */
+function captureHandshake(nonce, secret) {
+  if (nonce) pendingHandshakes.set(nonce, secret);
+}
 
 /** "Evermay - 19-video Package ($9000)" → "Evermay" (keep pricing off client view). */
 function cleanClientName(asanaName) {
@@ -40,10 +48,16 @@ async function connectProject(input) {
   // Register the webhook (skip if already connected).
   let webhook = store.getWebhookByProject(gid);
   if (!webhook) {
-    handshake.secret = null;
-    const created = await asana.createWebhook(gid); // resolves only after the handshake
-    const secret = handshake.secret;
-    handshake.secret = null;
+    const nonce = crypto.randomBytes(16).toString('hex');
+    let created;
+    try {
+      created = await asana.createWebhook(gid, nonce); // resolves only after the handshake
+    } catch (err) {
+      pendingHandshakes.delete(nonce);
+      throw err;
+    }
+    const secret = pendingHandshakes.get(nonce);
+    pendingHandshakes.delete(nonce);
     if (!secret) {
       throw new Error(
         'Asana webhook handshake did not complete — confirm PUBLIC_BASE_URL is this app’s public HTTPS URL and reachable.'
@@ -140,7 +154,7 @@ function listConnected() {
 }
 
 module.exports = {
-  handshake,
+  captureHandshake,
   cleanClientName,
   connectProject,
   disconnectProject,
