@@ -7,6 +7,8 @@ const { URL } = require('url');
 
 const store = require('./src/store');
 const auth = require('./src/auth');
+const asana = require('./src/asana');
+const sync = require('./src/sync');
 const { PHASES, stepLabel } = require('./src/phases');
 
 const PORT = process.env.PORT || 3000;
@@ -36,6 +38,7 @@ function videoView(video) {
     title: video.title,
     updatedAt: video.updatedAt,
     delivered: video.delivered,
+    asanaLinked: !!video.asanaTaskId,
     currentLabel: video.delivered ? 'Delivered' : current ? current.label : 'Not started',
     progress: video.delivered ? 100 : progress,
     steps,
@@ -45,7 +48,7 @@ function videoView(video) {
 function trackerView(project) {
   return {
     code: project.code,
-    clientName: project.clientName,
+    clientName: project.displayName || project.clientName,
     videos: store.listVideos(project.id).map(videoView),
   };
 }
@@ -62,23 +65,26 @@ function sendJson(res, status, body, extraHeaders = {}) {
   res.end(data);
 }
 
-function readBody(req) {
+function readRaw(req) {
   return new Promise((resolve, reject) => {
     let raw = '';
     req.on('data', (c) => {
       raw += c;
       if (raw.length > 1e6) reject(new Error('Payload too large'));
     });
-    req.on('end', () => {
-      if (!raw) return resolve({});
-      try {
-        resolve(JSON.parse(raw));
-      } catch (_) {
-        reject(new Error('Invalid JSON body'));
-      }
-    });
+    req.on('end', () => resolve(raw));
     req.on('error', reject);
   });
+}
+
+async function readBody(req) {
+  const raw = await readRaw(req);
+  if (!raw) return {};
+  try {
+    return JSON.parse(raw);
+  } catch (_) {
+    throw new Error('Invalid JSON body');
+  }
 }
 
 const CONTENT_TYPES = {
@@ -116,7 +122,7 @@ function requireStudio(req, res) {
 
 // ---- request handling ----------------------------------------------------
 
-const server = http.createServer(async (req, res) => {
+async function handleRequest(req, res) {
   const url = new URL(req.url, `http://${req.headers.host || 'localhost'}`);
   const pathname = decodeURIComponent(url.pathname);
   const method = req.method;
@@ -147,9 +153,39 @@ const server = http.createServer(async (req, res) => {
 
     const trackerMatch = pathname.match(/^\/api\/tracker\/(.+)$/);
     if (method === 'GET' && trackerMatch) {
-      const project = store.findProjectByCode(trackerMatch[1]);
+      const project = store.findProjectByCodeOrGid(trackerMatch[1]);
       if (!project) return sendJson(res, 404, { error: 'No project found for that code.' });
       return sendJson(res, 200, trackerView(project));
+    }
+
+    // --- Asana webhook (public; authenticated by handshake + HMAC signature) ---
+    if (method === 'POST' && pathname === '/api/hooks/asana') {
+      const raw = await readRaw(req);
+      // 1) Handshake: Asana sends X-Hook-Secret once, which we echo back. The
+      //    nonce in the query correlates the secret to the connect that started it.
+      const secretHeader = req.headers['x-hook-secret'];
+      if (secretHeader) {
+        sync.captureHandshake(url.searchParams.get('c'), secretHeader);
+        res.writeHead(200, { 'X-Hook-Secret': secretHeader });
+        return res.end();
+      }
+      // 2) Event delivery: verify signature, then reconcile in the background.
+      const signature = req.headers['x-hook-signature'];
+      const projectGid = sync.findProjectBySignature(raw, signature);
+      if (!projectGid) return sendJson(res, 401, { error: 'Invalid signature.' });
+      let events = [];
+      try {
+        events = (JSON.parse(raw || '{}').events) || [];
+      } catch (_) {
+        /* ignore malformed body */
+      }
+      // Acknowledge immediately (Asana expects a fast 200); process after.
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end('{"ok":true}');
+      sync.handleEvents(projectGid, events).catch((err) =>
+        console.error('[asana] handleEvents error:', err.message)
+      );
+      return;
     }
 
     // --- studio auth ---
@@ -171,6 +207,35 @@ const server = http.createServer(async (req, res) => {
     if (pathname.startsWith('/api/admin/')) {
       if (!requireStudio(req, res)) return;
 
+      // Asana integration
+      if (method === 'GET' && pathname === '/api/admin/asana/status') {
+        return sendJson(res, 200, {
+          configured: asana.isConfigured(),
+          publicBaseUrl: asana.publicBaseUrl(),
+          fieldName: asana.FIELD_NAME,
+          connected: sync.listConnected(),
+        });
+      }
+      if (method === 'POST' && pathname === '/api/admin/asana/connect') {
+        if (!asana.isConfigured()) {
+          return sendJson(res, 400, { error: 'Set ASANA_TOKEN on the server first.' });
+        }
+        const body = await readBody(req);
+        const result = await sync.connectProject(body.project);
+        return sendJson(res, 200, {
+          asanaProjectGid: result.project.asanaProjectGid,
+          code: result.project.code,
+          displayName: result.project.displayName || result.project.clientName,
+          imported: result.imported,
+        });
+      }
+      if (method === 'POST' && pathname === '/api/admin/asana/disconnect') {
+        const body = await readBody(req);
+        const gid = asana.parseProjectGid(body.asanaProjectGid || body.project);
+        await sync.disconnectProject(gid);
+        return sendJson(res, 200, { ok: true });
+      }
+
       // Projects
       if (method === 'GET' && pathname === '/api/admin/projects') {
         const projects = store.listProjects().map((p) => ({
@@ -188,7 +253,7 @@ const server = http.createServer(async (req, res) => {
       if (m) {
         if (method === 'PATCH') {
           const body = await readBody(req);
-          return sendJson(res, 200, { project: store.updateProject(m[1], body) });
+          return sendJson(res, 200, { project: store.updateProjectFields(m[1], body) });
         }
         if (method === 'DELETE') {
           store.deleteProject(m[1]);
@@ -231,12 +296,16 @@ const server = http.createServer(async (req, res) => {
     // Store validation errors are user-facing; treat as 400.
     return sendJson(res, 400, { error: err.message || 'Request failed.' });
   }
-});
+}
 
-server.listen(PORT, () => {
-  console.log(`Media Tracker running on http://localhost:${PORT}`);
-  console.log(`  Client tracker : http://localhost:${PORT}/`);
-  console.log(`  Studio side    : http://localhost:${PORT}/studio`);
-});
+const server = http.createServer(handleRequest);
 
-module.exports = server;
+if (require.main === module) {
+  server.listen(PORT, () => {
+    console.log(`Media Tracker running on http://localhost:${PORT}`);
+    console.log(`  Client tracker : http://localhost:${PORT}/`);
+    console.log(`  Studio side    : http://localhost:${PORT}/studio`);
+  });
+}
+
+module.exports = { server, handleRequest };

@@ -39,6 +39,25 @@
       <div id="projErr" class="err"></div>
     </div>
 
+    <div class="panel" id="asanaPanel">
+      <div class="spread">
+        <h2>Asana automation</h2>
+        <span id="asanaBadge" class="muted"></span>
+      </div>
+      <p class="muted" id="asanaHelp">
+        Connect a client's Asana project. Each video is a task with a
+        <strong>Tracker Phase</strong> dropdown; changing it updates this tracker automatically.
+        Your Pre/Pro/Post time-tracking tasks are ignored.
+      </p>
+      <form id="asanaConnectForm" class="row" autocomplete="off">
+        <input class="text" id="asanaProjectInput" placeholder="Paste an Asana project URL or ID"
+               style="min-width:280px;" />
+        <button type="submit">Connect project</button>
+      </form>
+      <div id="asanaErr" class="err"></div>
+      <div id="asanaConnected" style="margin-top:10px;"></div>
+    </div>
+
     <div id="projects"></div>
     <div class="footer-note">Client view: <a id="clientLink" href="/" target="_blank" rel="noopener">open the client tracker →</a></div>
   </main>

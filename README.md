@@ -58,6 +58,8 @@ Then open:
 | `MT_SECRET` | random each boot | HMAC secret for signing login cookies. Set a fixed value so logins survive restarts. |
 | `MT_DATA_DIR` | `./data` | Where `data.json` is stored. Point this at a persistent disk in production. |
 | `NODE_ENV` | — | Set to `production` to make the login cookie `Secure` + `SameSite=None`. |
+| `ASANA_TOKEN` | — | Optional. Asana Personal Access Token — enables the Asana integration. |
+| `PUBLIC_BASE_URL` | — | Optional. This app's public HTTPS origin (e.g. `https://tracker.valleystrategy.co`); used as the Asana webhook target. |
 
 Data lives in `data/data.json`, written atomically. It is `.gitignore`d. Back
 up that one file and you have backed up everything.
@@ -89,6 +91,10 @@ button; mark a video **Delivered** when it ships.
 | `PATCH` | `/api/admin/videos/:id` | studio | `{currentStepId?, title?, delivered?}` |
 | `POST` | `/api/admin/videos/:id/steps` | studio | `{key: "client_review"\|"revision"}` |
 | `DELETE` | `/api/admin/videos/:id/steps/:sid` | studio | remove a review/revision round |
+| `GET` | `/api/admin/asana/status` | studio | Asana config + connected projects |
+| `POST` | `/api/admin/asana/connect` | studio | `{project}` (URL or ID) → provision + import |
+| `POST` | `/api/admin/asana/disconnect` | studio | `{asanaProjectGid}` |
+| `POST` | `/api/hooks/asana` | signed | Asana webhook (handshake + HMAC) |
 
 The public tracker endpoint never exposes internal IDs beyond what the view
 needs, and returns `404` for unknown codes.
@@ -170,34 +176,45 @@ Checklist for production:
 
 ---
 
-## Automating phase updates (roadmap)
+## Asana automation (built in)
 
-Right now the studio sets phases manually — which is the reliable v1. Here are
-two automation paths, in the order I'd recommend building them.
+Phase changes can be driven straight from Asana — no studio clicks needed.
 
-### Option A — Asana (recommended first)
+**Model:** one Asana **project per client**. Each **video is a task** carrying a
+**"Tracker Phase"** dropdown (enum custom field) with options Transcription,
+Rough Edit, Fine Edit, Client Review, Revision, Final Cut Delivery, Delivered.
+Tasks *without* that field (e.g. your Pre-production / Production /
+Post-production time-tracking tasks) are ignored.
 
-Asana is the natural source of truth because the studio already moves tasks
-between stages there. Mechanism:
+**Linking:** a client's tracker is keyed to the **Asana project ID** (the number
+in the project URL). No manual mapping — the app auto-creates the client project
+and each video the first time it sees a phase. You can set a friendlier `code`
+and a clean client display name per project in the studio (Asana project names,
+which often contain pricing, are never shown to clients).
 
-1. In Asana, model each **video** as a task (or a project whose sections are the
-   phases). Add a custom field `Project Code` and `Video Title`, or map Asana
-   task GIDs to Media Tracker video IDs once.
-2. Create an Asana **webhook** pointing at a new endpoint here, e.g.
-   `POST /api/hooks/asana`. Asana fires it whenever a task changes section
-   ("Rough Edit" → "Fine Edit") or a custom field updates.
-3. The handler maps the Asana section name → a Media Tracker phase and calls the
-   same internal `updateVideo` / `addStep` logic the studio buttons use. Moving
-   a card to "Client Review" in Asana would add the next numbered Client Review
-   round automatically.
+**How it flows:**
 
-Pros: no editor behavior change, near-real-time, uses tools already in the
-workflow. Cons: needs a one-time mapping between Asana tasks and tracker videos,
-and an Asana Business plan for custom-field rules (webhooks themselves are on
-all paid tiers). *(An Asana connector is already available in this workspace, so
-we can prototype the mapping quickly.)*
+1. Set `ASANA_TOKEN` (a Personal Access Token) and `PUBLIC_BASE_URL` on the
+   server.
+2. In the studio's **Asana automation** panel, paste a client's Asana project
+   URL and click **Connect project**. The app then:
+   - creates/reuses a workspace-wide **"Tracker Phase"** field and adds it to
+     that project,
+   - registers an Asana **webhook** targeting `POST /api/hooks/asana`
+     (handshake + HMAC-signed), and
+   - imports any existing video tasks that already have a phase set.
+3. From then on, changing a task's **Tracker Phase** dropdown updates that
+   video's tracker within seconds. Setting it to **Client Review**, then
+   **Revision**, then **Client Review** again auto-numbers the rounds
+   (Client Review 1 → Revision 1 → Client Review 2 …). **Delivered** marks the
+   video complete.
 
-### Option B — Final Cut Pro
+The webhook is authenticated two ways: Asana's one-time `X-Hook-Secret`
+handshake, and an `X-Hook-Signature` HMAC on every event (verified against the
+per-project secret). Reconciliation is idempotent, so duplicate events are safe.
+The manual studio controls still work as an override.
+
+## Final Cut Pro (roadmap)
 
 Final Cut has no live status API, so automation there is event-based rather than
 continuous. Practical hooks:
@@ -217,10 +234,10 @@ for the review/revision loop. I'd treat FCP as a complement to Asana (auto-fire
 
 ### Recommendation
 
-Ship the manual v1 (this repo). Add the Asana webhook next for hands-off phase
-changes, and optionally add the FCP final-export hook for the delivery step.
-Keep the manual controls regardless — they're the override when reality doesn't
-match the tool.
+Asana drives phases now (above). FCP is an optional complement — auto-firing
+"Final Cut Delivery" on final export — not a primary driver. Keep the manual
+studio controls regardless; they're the override when reality doesn't match the
+tool.
 
 ---
 
@@ -228,9 +245,12 @@ match the tool.
 
 ```
 server.js              HTTP server, routing, static files, API
-src/phases.js          Phase definitions + client-facing tooltip text
-src/store.js           JSON-file data store (projects, videos, timeline)
+src/phases.js          Phase definitions + client-facing tooltip text + Asana map
+src/store.js           JSON-file data store (projects, videos, timeline, webhooks)
 src/auth.js            Studio password login (HMAC-signed cookie)
+src/asana.js           Asana REST client (tasks, fields, webhooks, signatures)
+src/sync.js            Asana ↔ tracker sync (connect, import, reconcile events)
+test/                  Phase-logic and HTTP-routing tests (node test/*.js)
 public/index.html      Client tracker (embeddable)
 public/studio.html     Studio console
 public/assets/         styles.css, client.js, studio.js

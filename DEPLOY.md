@@ -62,6 +62,8 @@ Open the service's **Variables** tab and add these:
 | `MT_SECRET` | *(a long random string)* | Signs login cookies. Generate one - see below. |
 | `MT_DATA_DIR` | `/data` | Points storage at the volume from step 2. |
 | `NODE_ENV` | `production` | Hardens the auth cookie (Secure + SameSite=None). |
+| `PUBLIC_BASE_URL` | `https://tracker.valleystrategy.co` | Your public URL (add once step 5 is done). Needed for Asana webhooks. |
+| `ASANA_TOKEN` | *(Asana Personal Access Token)* | Optional — enables Asana automation. See step 8. |
 
 **Generate `MT_SECRET`** - run this locally and paste the output as the value:
 
@@ -149,6 +151,27 @@ untouched by deploys.
 
 ---
 
+## 8. Enable Asana automation (optional)
+
+Lets you drive a video's phase from Asana instead of the studio.
+
+1. **Create an Asana Personal Access Token:** Asana → your profile photo →
+   **Settings → Apps → Personal access tokens → + Create new token**. Copy it.
+2. In Railway **Variables**, set `ASANA_TOKEN` to that token, and confirm
+   `PUBLIC_BASE_URL` is `https://tracker.valleystrategy.co`. Save (Railway
+   redeploys). **Don't paste the token into chat** - only into Railway.
+3. Open `/studio` → **Asana automation** panel → paste a client's Asana project
+   URL → **Connect project**. The app adds a **"Tracker Phase"** dropdown to that
+   project, registers the webhook, and imports any videos already tagged.
+4. In Asana, make each **video its own task** and set its **Tracker Phase**
+   dropdown. Your Pre/Pro/Post time-tracking tasks stay untouched (no dropdown =
+   ignored). Changing the dropdown updates the client's tracker within seconds.
+
+> The Asana project ID is the client's tracker code by default. You can set a
+> friendlier code and a clean client name per project in the studio.
+
+---
+
 ## Cost expectation
 
 Railway's Hobby plan is ~$5/month and includes usage credit; a low-traffic
@@ -168,3 +191,6 @@ never wait for the app to wake.
   then re-verify.
 - **Studio login won't stick:** make sure `NODE_ENV=production` and you're on
   `https://` (the secure cookie requires it).
+- **Asana "Connect project" fails with a handshake error:** confirm
+  `PUBLIC_BASE_URL` is set to your live HTTPS URL and the app is reachable there;
+  Asana must be able to call `POST /api/hooks/asana` during setup.
